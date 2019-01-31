@@ -58,7 +58,6 @@ export abstract class BaseLanguageServerContribution implements LanguageServerCo
     protected readonly processManager: ProcessManager;
 
     abstract start(clientConnection: IConnection, options: LanguageServerStartOptions): void;
-
     protected forward(clientConnection: IConnection, serverConnection: IConnection): void {
         forward(clientConnection, serverConnection, this.map.bind(this));
     }
@@ -76,7 +75,7 @@ export abstract class BaseLanguageServerContribution implements LanguageServerCo
     protected async createProcessSocketConnection(outSocket: MaybePromise<net.Socket>, inSocket: MaybePromise<net.Socket>,
         command: string, args?: string[], options?: cp.SpawnOptions): Promise<IConnection> {
 
-        const process = this.spawnProcess(command, args, options);
+        const process = await this.spawnProcessAsync(command, args, options);
         const [outSock, inSock] = await Promise.all([outSocket, inSocket]);
         return createProcessSocketConnection(process.process, outSock, inSock);
     }
@@ -91,6 +90,18 @@ export abstract class BaseLanguageServerContribution implements LanguageServerCo
         rawProcess.process.once('error', this.onDidFailSpawnProcess.bind(this));
         rawProcess.process.stderr.on('data', this.logError.bind(this));
         return rawProcess;
+    }
+
+    protected spawnProcessAsync(command: string, args?: string[], options?: cp.SpawnOptions): Promise<RawProcess> {
+        const rawProcess = this.processFactory({ command, args, options });
+        rawProcess.process.stderr.on('data', this.logError.bind(this));
+        return new Promise<RawProcess>((resolve, reject) => {
+            rawProcess.onError(error => {
+                this.onDidFailSpawnProcess(error);
+                reject(error);
+            });
+            rawProcess.process.once('message', () => resolve(rawProcess));
+        });
     }
 
     protected onDidFailSpawnProcess(error: Error): void {
